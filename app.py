@@ -25,8 +25,9 @@ class APIError(Exception):
 
 
 def create_app(test_config=None):
-    app = Flask(__name__, instance_relative_config=True)
-    Path(app.instance_path).mkdir(exist_ok=True)
+    app = Flask(__name__, instance_relative_config=True,
+                instance_path=os.environ.get('INSTANCE_PATH') or None)
+    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     app.config.update(
         SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32),
         API_BASE_URL=os.environ.get('API_BASE_URL', 'http://127.0.0.1:8000').rstrip('/'),

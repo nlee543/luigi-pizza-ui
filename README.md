@@ -32,12 +32,17 @@ Every browser mutation requires a per-session form CSRF token. API requests send
 
 ## Configuration
 
+For a GCP Debian VM, use the included **Gunicorn + Nginx + systemd** setup:
+[deployment instructions](deploy/README.md). Install `requirements-production.txt`
+on Linux. The production service keeps session data in `/var/lib/luigi-ui`.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `API_BASE_URL` | `http://127.0.0.1:8000` | Trusted API origin; keep this server-controlled. |
 | `API_CSRF_PROTECTION` | `1` | Login/registration preflight-protection header value; confirmed as `1` for this API. |
 | `SECRET_KEY` | Random per process | Set a stable high-entropy deployment secret. |
 | `COOKIE_SECURE` | Off | Set to `1` behind HTTPS. |
+| `INSTANCE_PATH` | Local `instance/` directory | Absolute path for server-side session storage. |
 
 The filesystem session store is suitable for this local single-host implementation. Before deployment, use an appropriately protected shared session store for multiple hosts, HTTPS, a stable secret, API-side login rate limiting, and a production WSGI server (for example Waitress on Windows). Do not expose Flask’s development server publicly. Exclude `instance/` from backups or sharing unless handled as sensitive session data; OneDrive users should place production session storage outside a synchronized directory. Sessions expire after eight hours.
 
