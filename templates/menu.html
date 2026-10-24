@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy"><p class="eyebrow">YOUR NEXT GREAT PIZZA STARTS HERE</p><h1>Big flavor.<br>Your way.</h1><p>Pick your size. Pile on your favorites.<br>We’ll take it from there.</p><a class="button white" href="#order-menu">Build your pizza <span>↗</span></a><div class="hero-note"><span>01 &nbsp; Choose</span><span>02 &nbsp; Customize</span><span>03 &nbsp; Enjoy</span></div></div>
+  <div class="hero-art"><div class="pizza-disc" role="img" aria-label="Illustration of a pepperoni pizza with basil"><i class="pepper p1"></i><i class="pepper p2"></i><i class="pepper p3"></i><i class="pepper p4"></i><i class="pepper p5"></i><i class="pepper p6"></i><i class="pepper p7"></i><i class="leaf l1"></i><i class="leaf l2"></i><i class="leaf l3"></i><i class="leaf l4"></i></div><div class="pizza-stamp">MADE<br><strong>FOR YOU</strong><br>♡</div><span class="art-caption">YOUR TOPPINGS. YOUR PERFECT COMBINATION.</span></div>
+</section>
+<section class="service-strip"><div><span class="step-icon">✓</span><p><strong>Make it yours</strong><small>Choose your favorite toppings</small></p></div><div><span class="step-icon">↗</span><p><strong>Follow every step</strong><small>Live updates from the kitchen</small></p></div><div><span class="step-icon">♡</span><p><strong>Your pizza, one account</strong><small>Sign in to order and track</small></p></div></section>
+<section class="section" id="order-menu">
+  <div class="section-heading"><div><p class="eyebrow green">THE GOOD STUFF</p><h2>Let’s get your order started.</h2></div><a class="outline-button" href="{{ url_for('cart') }}">View basket · {{ cart_count }}</a></div>
+  {% if menu_error %}<div class="notice error">{{ menu_error }} <a href="{{ url_for('menu') }}">Try again</a></div>{% endif %}
+  <div class="menu-tabs"><a class="active" href="#pizzas">Build a pizza</a><a href="#drinks">Drinks</a></div>
+  <div class="pizza-grid" id="pizzas">
+  {% for pizza in pizzas %}<article class="product-card">
+    <div class="product-art"><div class="mini-pizza" aria-hidden="true"><span></span></div><span class="size-tag">{{ pizza.size|upper }}</span></div>
+    <div class="product-body"><div class="product-title"><h3>{{ pizza.size|title }} pizza</h3><strong>{{ pizza.price|money }}</strong></div><p class="muted">Your base. Your favorite toppings.</p>
+    <form action="{{ url_for('add_cart') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="pizzas"><input type="hidden" name="item_id" value="{{ pizza.id }}">
+      <details><summary>Choose your toppings <span>+</span></summary><fieldset class="toppings"><legend class="sr-only">Toppings for {{ pizza.size }} pizza</legend>{% for topping in toppings %}<label><input type="checkbox" name="topping_ids" value="{{ topping.id }}"> {{ topping.name }}</label>{% endfor %}{% if not toppings %}<p>No toppings available.</p>{% endif %}</fieldset></details>
+      <div class="add-row"><label class="quantity-label">Qty<input type="number" name="quantity" value="1" min="1" max="99" required aria-label="{{ pizza.size }} pizza quantity"></label><button class="button">Add to basket <span>+</span></button></div>
+    </form></div>
+  </article>{% else %}{% if not menu_error %}<p class="empty">Pizzas will appear here when the kitchen adds them.</p>{% endif %}{% endfor %}
+  </div>
+</section>
+<section class="tracker-banner"><div><p class="eyebrow">FROM OUR KITCHEN TO YOUR NEXT BITE</p><h2>Good things are on the way.</h2><p>Already ordered? See exactly where your pizza is.</p></div><a class="button white" href="{{ url_for('orders') }}">Track your order <span>→</span></a></section>
+<section class="section" id="drinks"><div class="section-heading"><div><p class="eyebrow green">THE PERFECT PLUS-ONE</p><h2>Something to sip.</h2></div></div><div class="drink-grid">
+{% for drink in drinks %}<article class="drink-card"><div class="drink-symbol" aria-hidden="true">▤</div><div><h3>{{ drink.name }}</h3><p class="muted">{{ drink.size|title }} · {{ drink.price|money }}</p></div><form action="{{ url_for('add_cart') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="drinks"><input type="hidden" name="item_id" value="{{ drink.id }}"><button class="round-button" aria-label="Add {{ drink.size }} {{ drink.name }} to basket">+</button></form></article>{% else %}<p class="muted">No drinks available right now.</p>{% endfor %}
+</div></section>
+{% endblock %}

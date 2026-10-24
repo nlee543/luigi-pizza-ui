@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}{{ {'login':'Sign in','register':'Create account','password':'Change password'}[mode] }} · Luigi’s{% endblock %}
+{% block content %}<section class="auth-layout"><aside class="auth-story"><p class="eyebrow">WELCOME TO THE TABLE</p><h1>Your pizza.<br>Your people.<br>Your Luigi’s.</h1><p>One account for your favorites, your next order, and every update from the kitchen.</p><div class="auth-emblem">L<span>★</span></div></aside><div class="auth-panel">
+<p class="eyebrow green">{% if mode == 'login' and request.args.get('staff') %}STAFF KITCHEN{% else %}LUIGI’S PIZZA{% endif %}</p>
+<h2>{{ {'login':'Welcome back.','register':'Pull up a chair.','password':'A fresh password.'}[mode] }}</h2>
+<p class="muted">{% if mode == 'login' %}Sign in to order, track, and enjoy.{% elif mode == 'register' %}Create your account before placing an online order.{% else %}{% if user.must_change_password %}Please change your temporary password to continue.{% else %}Keep your account secure with a new password.{% endif %}{% endif %}</p>
+<form method="post" class="stack-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{% if mode in ['login','register'] %}<label>Email address<input type="email" name="email" autocomplete="username" maxlength="254" required value="{{ request.form.get('email','') }}"></label>{% endif %}
+{% if mode == 'register' %}<div class="form-grid"><label>Full name<input name="name" autocomplete="name" maxlength="100" required value="{{ request.form.get('name','') }}"></label><label>Phone number<input type="tel" name="phone_number" autocomplete="tel" maxlength="40" required value="{{ request.form.get('phone_number','') }}"></label></div><label>Address<input name="address" autocomplete="street-address" maxlength="500" required value="{{ request.form.get('address','') }}"></label><label>Name for your order<input name="dine_in_name" maxlength="100" required value="{{ request.form.get('dine_in_name','') }}"><small>The name staff will call when your order is ready.</small></label>{% endif %}
+{% if mode == 'password' %}<label>Current password<input type="password" name="current_password" autocomplete="current-password" maxlength="128" required></label><label>New password<input type="password" name="new_password" autocomplete="new-password" minlength="12" maxlength="128" required><small>At least 12 characters.</small></label><label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" maxlength="128" required></label>
+{% else %}<label>Password<input type="password" name="password" autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}" minlength="{{ 12 if mode == 'register' else 1 }}" maxlength="128" required>{% if mode == 'register' %}<small>At least 12 characters.</small>{% endif %}</label>{% endif %}
+<button class="button">{{ {'login':'Sign in','register':'Create account','password':'Change password'}[mode] }} <span>→</span></button>
+</form>
+{% if mode == 'login' %}<p class="form-foot">New to Luigi’s? <a href="{{ url_for('register') }}">Create an account</a></p>{% elif mode == 'register' %}<p class="form-foot">Already a regular? <a href="{{ url_for('login') }}">Sign in</a></p>{% endif %}
+</div></section>{% endblock %}

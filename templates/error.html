@@ -1,0 +1,2 @@
+{% extends 'base.html' %}
+{% block content %}<section class="section empty-state"><p class="eyebrow green">LET’S TRY THAT AGAIN</p><h1 class="page-title">A little pause in the kitchen.</h1><p>{{ message }}</p>{% if user %}<p><a href="{{ url_for('staff' if user.role in ['staff','admin'] else 'orders') }}">Check order history →</a></p>{% endif %}<a class="button" href="{{ url_for('menu') }}">Back to the menu →</a></section>{% endblock %}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Luigi’s Pizza{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="flag-line"></div>
+<header class="site-header">
+  <a class="brand" href="{{ url_for('menu') }}" aria-label="Luigi’s Pizza home"><span class="brand-mark">L<span>★</span></span><span>LUIGI’S<small>PIZZA KITCHEN</small></span></a>
+  <nav aria-label="Main navigation">
+    <a href="{{ url_for('menu', _anchor='order-menu') }}">Our menu</a>
+    <a href="{{ url_for('orders') }}">Order tracker</a>
+    {% if user and user.role in ['staff','admin'] %}<a href="{{ url_for('staff') }}">Staff kitchen</a>{% endif %}
+  </nav>
+  <div class="header-actions">
+    {% if user %}<a class="account-link" href="{{ url_for('password') }}">Hi, {{ user.name.split(' ')[0] }}</a><form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-button">Sign out</button></form>
+    {% else %}<a class="account-link" href="{{ url_for('login') }}">Sign in</a>{% endif %}
+    <a class="basket-link" href="{{ url_for('cart') }}">Basket <span>{{ cart_count }}</span></a>
+  </div>
+</header>
+<main id="main">
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-wrap" aria-live="polite">{% for category, message in messages %}<div class="notice {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+{% block content %}{% endblock %}
+</main>
+<footer><a class="footer-brand" href="{{ url_for('menu') }}">LUIGI’S PIZZA</a><span>A little Italian. A lot to love.</span><a href="{{ url_for('staff') }}">Staff sign in ↗</a></footer>
+</body>
+</html>
