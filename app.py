@@ -1,10 +1,12 @@
 """Server-rendered pizza ordering UI. API credentials never enter browser storage."""
 import os
 import secrets
-from datetime import timedelta
-from decimal import Decimal
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from cachelib.file import FileSystemCache
@@ -18,10 +20,102 @@ STATUSES = {
 }
 
 
+ANALYTICS_RANGES = (7, 30, 90, 365)
+MAX_ANALYTICS_ORDERS = 50000
+
+
 class APIError(Exception):
     def __init__(self, message, status=502):
         super().__init__(message)
         self.status = status
+
+
+def parse_order_time(value):
+    placed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    return placed if placed.tzinfo else placed.replace(tzinfo=timezone.utc)
+
+
+def short_date(day):
+    return f'{day:%b} {day.day}'
+
+
+def hour_label(hour):
+    return f'{hour % 12 or 12} {"AM" if hour < 12 else "PM"}'
+
+
+def bar_chart(values, labels, unit, tick_every=1, width=720, height=180):
+    """Geometry for a plain SVG bar chart; no inline styles so the strict CSP still applies."""
+    top = max(values, default=0) or 1
+    slot = width / max(len(values), 1)
+    gap = min(4, slot * .25)
+    bars, ticks = [], []
+    for index, (value, label) in enumerate(zip(values, labels)):
+        bar_height = round(height * value / top, 1)
+        bars.append(dict(x=round(index * slot + gap / 2, 1), y=round(height - bar_height, 1),
+                         width=round(slot - gap, 1), height=bar_height, label=label, value=value))
+        if index % tick_every == 0:
+            ticks.append(dict(x=round(index * slot + slot / 2, 1), text=label.removeprefix('Week of ')))
+    return dict(width=width, height=height, bars=bars, ticks=ticks, top=max(values, default=0), unit=unit)
+
+
+def ranked(counter, limit=5):
+    rows = counter.most_common(limit)
+    return [dict(name=name, count=count, top=rows[0][1]) for name, count in rows]
+
+
+def build_analytics(orders, menu, days, tz, now=None):
+    """Summarise orders placed in the last `days` days (in `tz`). Revenue uses current menu prices."""
+    today = (now or datetime.now(timezone.utc)).astimezone(tz).date()
+    first = today - timedelta(days=days - 1)
+    pizzas = {p['id']: p for p in menu['pizzas']}
+    drinks = {d['id']: d for d in menu['drinks']}
+    toppings = {t['id']: t['name'] for t in menu['toppings']}
+    daily = {first + timedelta(days=i): [0, Decimal('0')] for i in range(days)}
+    hours, status_counts = [0] * 24, Counter()
+    pizza_counts, drink_counts, topping_counts = Counter(), Counter(), Counter()
+    count, revenue, items = 0, Decimal('0'), 0
+    for order in orders:
+        local = parse_order_time(order['order_time']).astimezone(tz)
+        if not first <= local.date() <= today:
+            continue
+        total = Decimal('0')
+        for line in order.get('pizzas', []):
+            pizza, quantity = pizzas.get(line['pizza_id']), line['quantity']
+            items += quantity
+            if pizza:
+                total += Decimal(pizza['price']) * quantity
+            pizza_counts[pizza['size'].title() + ' pizza' if pizza else 'Removed pizza'] += quantity
+            for topping_id in line.get('topping_ids', []):
+                topping_counts[toppings.get(topping_id, 'Removed topping')] += quantity
+        for line in order.get('drinks', []):
+            drink, quantity = drinks.get(line['drink_id']), line['quantity']
+            items += quantity
+            if drink:
+                total += Decimal(drink['price']) * quantity
+            drink_counts[f"{drink['name']} · {drink['size']}" if drink else 'Removed drink'] += quantity
+        count += 1
+        revenue += total
+        hours[local.hour] += 1
+        status_counts[order['status']] += 1
+        daily[local.date()][0] += 1
+        daily[local.date()][1] += total
+    step = 7 if days > 90 else 1
+    rows = []
+    for start in range(0, days, step):
+        bucket = [daily[first + timedelta(days=i)] for i in range(start, min(start + step, days))]
+        label = short_date(first + timedelta(days=start))
+        rows.append(dict(label=('Week of ' + label) if step > 1 else label,
+                         orders=sum(b[0] for b in bucket), revenue=sum((b[1] for b in bucket), Decimal('0'))))
+    return dict(
+        orders=count, revenue=revenue, average=(revenue / count) if count else Decimal('0'), items=items,
+        open_orders=count - status_counts['completed'], step=step, rows=rows,
+        daily_chart=bar_chart([r['orders'] for r in rows], [r['label'] for r in rows], 'orders',
+                              tick_every=max(1, len(rows) // 6)),
+        hour_chart=bar_chart(hours, [hour_label(h) for h in range(24)], 'order', tick_every=6),
+        statuses=[dict(name=label, count=status_counts[key], top=max(count, 1)) for key, label in STATUSES.items()],
+        pizzas=ranked(pizza_counts), drinks=ranked(drink_counts), toppings=ranked(topping_counts),
+        busiest=(hour_label(hours.index(max(hours))) if count else None),
+    )
 
 
 def create_app(test_config=None):
@@ -32,6 +126,7 @@ def create_app(test_config=None):
         SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32),
         API_BASE_URL=os.environ.get('API_BASE_URL', 'http://127.0.0.1:8000').rstrip('/'),
         API_CSRF_PROTECTION=os.environ.get('API_CSRF_PROTECTION', '1'),
+        BUSINESS_TIMEZONE=os.environ.get('BUSINESS_TIMEZONE', 'America/Chicago'),
         SESSION_TYPE='cachelib',
         SESSION_CACHELIB=FileSystemCache(str(Path(app.instance_path) / 'sessions'), threshold=1000, mode=0o600),
         SESSION_COOKIE_NAME='luigi_ui', SESSION_COOKIE_HTTPONLY=True,
@@ -76,12 +171,12 @@ def create_app(test_config=None):
         except ValueError as exc:
             raise APIError('The kitchen returned an unreadable response. Please try again.') from exc
 
-    def all_items(path):
+    def all_items(path, page=100, max_items=None):
         result = []
         while True:
-            batch = api('GET', path, params={'offset': len(result), 'limit': 100})
+            batch = api('GET', path, params={'offset': len(result), 'limit': page})
             result.extend(batch)
-            if len(batch) < 100:
+            if len(batch) < page or (max_items and len(result) >= max_items):
                 return result
 
     def menu_data():
@@ -363,6 +458,76 @@ def create_app(test_config=None):
         offset = max(0, request.args.get('offset', 0, type=int))
         result = api('GET', '/staff/customers', params={'q': q, 'offset': offset, 'limit': 25})
         return render_template('customers.html', customers=result, q=q, offset=offset)
+
+    def inventory_payload():
+        name, unit = request.form.get('name', '').strip(), request.form.get('unit', '').strip()
+        if not 1 <= len(name) <= 50:
+            abort(400, description='Enter an ingredient name of up to 50 characters.')
+        if not 1 <= len(unit) <= 10:
+            abort(400, description='Enter a unit of up to 10 characters, such as kg, lb, or boxes.')
+        message = 'Quantity must be 0 or more, below 1,000,000,000, with at most one decimal place.'
+        try:
+            amount = Decimal(request.form.get('quantity', '').strip())
+        except InvalidOperation:
+            abort(400, description=message)
+        if not amount.is_finite() or not 0 <= amount < Decimal('1e9') or amount != amount.quantize(Decimal('0.1')):
+            abort(400, description=message)
+        return {'name': name, 'unit': unit, 'quantity': f"{amount.quantize(Decimal('0.1')):f}"}
+
+    def inventory_result(action, success):
+        try:
+            action()
+        except APIError as error:
+            if error.status == 401:
+                raise
+            flash(str(error), 'error')
+        else:
+            flash(success, 'success')
+        return redirect(url_for('inventory', q=request.form.get('q', '')[:50] or None))
+
+    @app.get('/staff/inventory')
+    @login_required(staff=True)
+    def inventory():
+        q = request.args.get('q', '').strip()[:50]
+        items = sorted(all_items('/inventory'), key=lambda item: item['name'].lower())
+        for item in items:
+            item['out'] = Decimal(item['quantity']) == 0
+        shown = [item for item in items if q.lower() in item['name'].lower()]
+        return render_template('inventory.html', items=shown, q=q, total=len(items),
+                               out_count=sum(item['out'] for item in items))
+
+    @app.post('/staff/inventory')
+    @login_required(staff=True)
+    def inventory_create():
+        payload = inventory_payload()
+        return inventory_result(lambda: api('POST', '/inventory', payload), f"Added {payload['name']}.")
+
+    @app.post('/staff/inventory/<int:item_id>')
+    @login_required(staff=True)
+    def inventory_update(item_id):
+        payload = inventory_payload()
+        return inventory_result(lambda: api('PUT', f'/inventory/{item_id}', payload), f"Saved {payload['name']}.")
+
+    @app.post('/staff/inventory/<int:item_id>/delete')
+    @login_required(staff=True)
+    def inventory_delete(item_id):
+        return inventory_result(lambda: api('DELETE', f'/inventory/{item_id}'), 'Ingredient removed.')
+
+    @app.get('/staff/analytics')
+    @login_required(staff=True)
+    def analytics():
+        days = request.args.get('days', 30, type=int)
+        if days not in ANALYTICS_RANGES:
+            days = 30
+        try:
+            tz = ZoneInfo(app.config['BUSINESS_TIMEZONE'])
+        except (ZoneInfoNotFoundError, ValueError):
+            tz = timezone.utc
+        orders = all_items('/orders', page=1000, max_items=MAX_ANALYTICS_ORDERS)
+        data = build_analytics(orders, menu_data(), days, tz)
+        return render_template('analytics.html', data=data, days=days, ranges=ANALYTICS_RANGES,
+                               tz_name=getattr(tz, 'key', 'UTC'),
+                               truncated=len(orders) >= MAX_ANALYTICS_ORDERS)
 
     @app.post('/staff/customer/select')
     @login_required(staff=True)
