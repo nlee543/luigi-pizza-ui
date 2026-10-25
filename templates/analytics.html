@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Analytics · Luigi’s Pizza{% endblock %}
+{% macro bars(chart, label) %}<svg class="chart" viewBox="0 0 {{ chart.width }} {{ chart.height + 24 }}" role="img" aria-label="{{ label }}"><text class="axis-label" x="0" y="11">{{ chart.top }}</text><line class="axis" x1="0" x2="{{ chart.width }}" y1="{{ chart.height }}" y2="{{ chart.height }}"/>{% for bar in chart.bars %}<rect class="bar" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}" rx="2"><title>{{ bar.label }}: {{ bar.value }} {{ chart.unit }}{{ '' if bar.value == 1 else 's' }}</title></rect>{% endfor %}{% for tick in chart.ticks %}<text class="axis-label" x="{{ tick.x }}" y="{{ chart.height + 18 }}" text-anchor="middle">{{ tick.text }}</text>{% endfor %}</svg>{% endmacro %}
+{% macro ranking(rows, empty) %}{% if rows %}<ol class="rank-list">{% for row in rows %}<li><div class="rank-head"><span>{{ row.name }}</span><strong>{{ row.count }}</strong></div><progress class="meter" max="{{ row.top }}" value="{{ row.count }}">{{ row.count }}</progress></li>{% endfor %}</ol>{% else %}<p class="muted small">{{ empty }}</p>{% endif %}{% endmacro %}
+{% block content %}<section class="section"><a class="back-link" href="{{ url_for('staff') }}">← Staff kitchen</a>
+<div class="section-heading"><div><p class="eyebrow green">STAFF KITCHEN</p><h1 class="page-title">Analytics.</h1><p class="muted">Orders from the last {{ days }} days · times in {{ tz_name }}</p></div><a class="outline-button" href="{{ url_for('inventory') }}">Open inventory →</a></div>
+<nav class="menu-tabs" aria-label="Date range">{% for r in ranges %}<a href="{{ url_for('analytics', days=r) }}"{% if r == days %} class="active" aria-current="page"{% endif %}>{{ 'Last ' ~ r ~ ' days' }}</a>{% endfor %}</nav>
+{% if truncated %}<div class="notice error">This view includes only the first {{ '{:,}'.format(50000) }} orders, so recent activity may be missing.</div>{% endif %}
+
+<div class="stat-grid">
+<div class="stat"><strong>{{ data.orders }}</strong><span>Orders</span></div>
+<div class="stat"><strong>{{ data.revenue|money }}</strong><span>Estimated revenue*</span></div>
+<div class="stat"><strong>{{ data.average|money }}</strong><span>Average order*</span></div>
+<div class="stat"><strong>{{ data.open_orders }}</strong><span>Not yet completed</span></div>
+</div>
+
+{% if data.orders %}
+<div class="panel chart-panel"><h2>{{ 'Orders per week' if data.step > 1 else 'Orders per day' }}</h2>{{ bars(data.daily_chart, 'Orders per ' ~ ('week' if data.step > 1 else 'day')) }}
+<details><summary>View as table</summary><table class="data-table"><thead><tr><th>{{ 'Week' if data.step > 1 else 'Day' }}</th><th>Orders</th><th>Est. revenue*</th></tr></thead><tbody>{% for row in data.rows %}<tr><td>{{ row.label }}</td><td>{{ row.orders }}</td><td>{{ row.revenue|money }}</td></tr>{% endfor %}</tbody></table></details></div>
+
+<div class="analytics-grid">
+<div class="panel"><h2>Popular pizzas</h2>{{ ranking(data.pizzas, 'No pizzas ordered.') }}</div>
+<div class="panel"><h2>Popular drinks</h2>{{ ranking(data.drinks, 'No drinks ordered.') }}</div>
+<div class="panel"><h2>Popular toppings</h2>{{ ranking(data.toppings, 'No toppings ordered.') }}</div>
+<div class="panel"><h2>Order status</h2><ol class="rank-list">{% for row in data.statuses %}<li><div class="rank-head"><span>{{ row.name }}</span><strong>{{ row.count }}</strong></div><progress class="meter" max="{{ row.top }}" value="{{ row.count }}">{{ row.count }}</progress></li>{% endfor %}</ol></div>
+</div>
+
+<div class="panel chart-panel"><h2>Busiest hours</h2><p class="muted small">Busiest hour: {{ data.busiest }}. {{ data.items }} items ordered in this period.</p>{{ bars(data.hour_chart, 'Orders by hour of day') }}</div>
+{% else %}<div class="empty-state"><h2>No orders in this period.</h2><p class="muted">Try a longer date range.</p></div>{% endif %}
+<p class="muted small">*The API does not store prices on orders, so revenue and averages use <strong>current</strong> menu prices and exclude any topping charges. Treat them as estimates, especially after a price change.</p>
+</section>{% endblock %}

@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}Inventory · Luigi’s Pizza{% endblock %}
+{% block content %}<section class="section"><a class="back-link" href="{{ url_for('staff') }}">← Staff kitchen</a>
+<div class="section-heading"><div><p class="eyebrow green">STAFF KITCHEN</p><h1 class="page-title">Inventory.</h1><p class="muted">{{ total }} ingredient{{ '' if total == 1 else 's' }} tracked{% if out_count %} · {{ out_count }} out of stock{% endif %}</p></div><a class="outline-button" href="{{ url_for('analytics') }}">View analytics →</a></div>
+
+<div class="panel inventory-add"><h2>Add an ingredient</h2>
+<form method="post" action="{{ url_for('inventory_create') }}" class="inventory-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="q" value="{{ q }}">
+<label>Name<input name="name" required maxlength="50" placeholder="Mozzarella"></label>
+<label>Quantity<input name="quantity" required inputmode="decimal" pattern="[0-9]+(\.[0-9])?" title="A number with at most one decimal place" placeholder="12.5"></label>
+<label>Unit<input name="unit" required maxlength="10" placeholder="kg"></label>
+<button class="button">Add →</button></form></div>
+
+<form method="get" class="search-form"><label class="sr-only" for="inventory-search">Filter ingredients</label><input id="inventory-search" name="q" value="{{ q }}" maxlength="50" placeholder="Filter by name"><button class="button">Filter →</button>{% if q %}<a class="outline-button" href="{{ url_for('inventory') }}">Clear</a>{% endif %}</form>
+
+<div class="orders-list">{% for item in items %}<article class="inventory-item">
+<form method="post" action="{{ url_for('inventory_update', item_id=item.id) }}" class="inventory-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="q" value="{{ q }}">
+<label><span class="sr-only">Name of </span>Name<input name="name" value="{{ item.name }}" required maxlength="50"></label>
+<label>Quantity<input name="quantity" value="{{ item.quantity }}" required inputmode="decimal" pattern="[0-9]+(\.[0-9])?" title="A number with at most one decimal place"></label>
+<label>Unit<input name="unit" value="{{ item.unit }}" required maxlength="10"></label>
+<button class="outline-button">Save</button>{% if item.out %}<span class="status-pill out">Out of stock</span>{% endif %}</form>
+<details class="remove"><summary>Remove</summary><form method="post" action="{{ url_for('inventory_delete', item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="q" value="{{ q }}"><p class="small">Remove {{ item.name }} from inventory? This cannot be undone.</p><button class="button">Yes, remove</button></form></details>
+</article>{% else %}<div class="empty-state"><h2>{{ 'No matching ingredients.' if q else 'Nothing in inventory yet.' }}</h2><p class="muted">{{ 'Try a different name.' if q else 'Add your first ingredient above.' }}</p></div>{% endfor %}</div></section>{% endblock %}
