@@ -20,6 +20,8 @@ Open http://127.0.0.1:5000. Keep the API running on port 8000. The UI contacts t
 - Customers: registration, login, logout, required temporary-password changes, password changes, checkout, order history, and order details.
 - Tracking: actual API `status`, refreshed every 15 seconds while the tab is visible, with completed orders stopping polling. Pickup and delivery share a branching fulfillment stage. Without JavaScript, the status is visible and a refresh link is provided.
 - Staff/admin: protected kitchen dashboard, paginated customer search, customer selection, ordering through `POST /staff/orders`, and status updates through `PATCH /orders/{id}/status`.
+- Inventory (`/staff/inventory`): filterable ingredient list with add, edit (name, quantity, unit), and remove (with confirmation) through the API's `/inventory` endpoints. Items at zero are flagged out of stock. The API has no reorder-level field, so no low-stock threshold is invented.
+- Analytics (`/staff/analytics`): orders, estimated revenue and average order, orders per day (per week for the 365-day range), popular pizzas/drinks/toppings, order-status mix, and busiest hours, for the last 7/30/90/365 days. Charts are plain SVG and `<progress>` elements, so they work without JavaScript under the strict CSP, and the daily chart has a table view.
 - Accessible labels, keyboard focus, skip navigation, responsive CSS, error messages, and preserved baskets after API errors.
 
 Staff sign in with the same API login endpoint; the API role determines access. Staff can build a basket, find/select a customer, and submit for that customer. The API remains authoritative for customer ownership, staff authorization, availability, and accepted status changes.
@@ -43,6 +45,7 @@ on Linux. The production service keeps session data in `/var/lib/luigi-ui`.
 | `SECRET_KEY` | Random per process | Set a stable high-entropy deployment secret. |
 | `COOKIE_SECURE` | Off | Set to `1` behind HTTPS. |
 | `INSTANCE_PATH` | Local `instance/` directory | Absolute path for server-side session storage. |
+| `BUSINESS_TIMEZONE` | `America/Chicago` | IANA time zone used to group orders by day and hour on the analytics page. Falls back to UTC if unrecognized. |
 
 The filesystem session store is suitable for this local single-host implementation. Before deployment, use an appropriately protected shared session store for multiple hosts, HTTPS, a stable secret, API-side login rate limiting, and a production WSGI server (for example Waitress on Windows). Do not expose Flask’s development server publicly. Exclude `instance/` from backups or sharing unless handled as sensitive session data; OneDrive users should place production session storage outside a synchronized directory. Sessions expire after eight hours.
 
@@ -53,7 +56,8 @@ The checked-in `openapi.json` is the local API contract inspected during impleme
 - The API has no fulfillment-selection field, payment endpoint, tax/fee breakdown, order total, or price snapshot. The UI does not submit invented fields or collect payment. Basket amounts are **current menu subtotals**, displayed in dollars as an initial assumption. Historical orders show contents, not reconstructed historical totals.
 - Toppings have names and IDs but no prices. No topping surcharge is invented.
 - Status values are `order_received`, `preparing`, `out_for_delivery`, `ready_for_pickup`, and `completed`. No delivery estimate or intermediate baking status is fabricated.
-- Staff menu/inventory administration, customer profile editing, and staff-assisted customer registration are not part of this initial ordering-focused UI.
+- Staff menu (pizza, drink, topping) administration, customer profile editing, and staff-assisted customer registration are not part of this initial ordering-focused UI.
+- Analytics are computed in the UI from `GET /orders` (up to 50,000 orders, fetched 1,000 at a time) and the current menu. Because orders store no price snapshot, revenue and averages use **current** menu prices and are estimates. There is no dedicated analytics endpoint; if order volume grows, an aggregate endpoint on the API would be cheaper than fetching every order.
 - A basket token and disabled submit button prevent ordinary repeat submissions, but the API has no documented idempotency key. Concurrent requests or a timeout after the API accepted an order cannot be made exactly-once by this UI. After an ambiguous submission failure, check order history before resubmitting. API idempotency is recommended before production use.
 - The login/registration CSRF header value is confirmed as `1`. Live login/logout and protected-page access were verified with customer and admin test accounts; a distinct staff account has not been tested.
 
