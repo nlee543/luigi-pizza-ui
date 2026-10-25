@@ -12,6 +12,7 @@ USER = dict(id=1, name='Test Customer', email='customer@example.test', role='cus
 MENU = {'/pizzas': [dict(id=1, size='large', price='9.00')],
         '/toppings': [dict(id=7, name='Pepperoni')],
         '/drinks': [dict(id=1, name='Coke', size='small', price='1.00')]}
+INVENTORY = [dict(id=2, name='mozzarella', unit='kg', quantity='0.0'), dict(id=1, name='Flour', unit='kg', quantity='12.5')]
 ORDER = dict(id=10, user_id=1, created_by_user_id=1, status='preparing', order_time='2026-10-24T12:00:00Z',
              pizzas=[dict(pizza_id=1, quantity=2, topping_ids=[7])], drinks=[])
 
@@ -44,6 +45,16 @@ def setup():
             response.status_code = 204
         elif path == '/staff/customers':
             payload = [USER]
+        elif path == '/inventory' and method == 'GET':
+            payload = INVENTORY
+        elif path == '/inventory' and method == 'POST':
+            response.status_code = 201
+            payload = dict(id=3, **kwargs['json'])
+        elif path.startswith('/inventory/') and method == 'PUT':
+            payload = dict(id=int(path.rsplit('/', 1)[1]), **kwargs['json'])
+        elif path.startswith('/inventory/') and method == 'DELETE':
+            response.status_code = 204
+            return response
         elif path == '/orders' and method == 'GET':
             payload = [ORDER]
         elif path in ('/orders', '/staff/orders'):
@@ -195,3 +206,95 @@ def test_order_failure_preserves_basket(setup):
     assert b'Check your order history' in response.data
     with client.session_transaction() as session:
         assert len(session['cart']) == 1
+
+
+def sign_in_staff(setup):
+    client, calls, state = setup
+    state['user']['role'] = 'staff'
+    sign_in(client)
+    return client, calls, state
+
+
+def test_inventory_and_analytics_require_staff(setup):
+    client, calls, _ = setup
+    for route in ('/staff/inventory', '/staff/analytics'):
+        assert client.get(route).status_code == 302
+    sign_in(client)
+    for route in ('/staff/inventory', '/staff/analytics'):
+        assert client.get(route).status_code == 403
+    for route in ('/staff/inventory', '/staff/inventory/1', '/staff/inventory/1/delete'):
+        assert post(client, route, name='Salt', unit='kg', quantity='1').status_code == 403
+    assert not any(call[1].startswith('/inventory') for call in calls)
+
+
+def test_inventory_list_sorted_with_out_of_stock(setup):
+    client, _, _ = sign_in_staff(setup)
+    page = client.get('/staff/inventory').data.decode()
+    assert page.index('Flour') < page.index('mozzarella')
+    assert '1 out of stock' in page and 'Out of stock' in page
+    assert 'Flour' in client.get('/staff/inventory?q=flo').data.decode()
+    assert 'mozzarella' not in client.get('/staff/inventory?q=flo').data.decode()
+
+
+def test_inventory_create_update_delete(setup):
+    client, calls, _ = sign_in_staff(setup)
+    assert post(client, '/staff/inventory', name=' Basil ', unit='kg', quantity='4.5', q='ba').status_code == 302
+    assert calls[-1][:2] == ('POST', '/inventory')
+    assert calls[-1][2]['json'] == {'name': 'Basil', 'unit': 'kg', 'quantity': '4.5'}
+    assert post(client, '/staff/inventory/1', name='Flour', unit='lb', quantity='7').status_code == 302
+    assert calls[-1][:2] == ('PUT', '/inventory/1')
+    assert calls[-1][2]['json'] == {'name': 'Flour', 'unit': 'lb', 'quantity': '7.0'}
+    response = post(client, '/staff/inventory/1/delete')
+    assert response.status_code == 302 and calls[-1][:2] == ('DELETE', '/inventory/1')
+    assert b'Ingredient removed.' in client.get('/staff/inventory').data
+
+
+def test_inventory_rejects_invalid_input_before_calling_api(setup):
+    client, calls, _ = sign_in_staff(setup)
+    before = len(calls)
+    bad = [dict(name='', unit='kg', quantity='1'), dict(name='x' * 51, unit='kg', quantity='1'),
+           dict(name='Salt', unit='', quantity='1'), dict(name='Salt', unit='x' * 11, quantity='1'),
+           dict(name='Salt', unit='kg', quantity='-1'), dict(name='Salt', unit='kg', quantity='1.25'),
+           dict(name='Salt', unit='kg', quantity='abc'), dict(name='Salt', unit='kg', quantity='NaN'),
+           dict(name='Salt', unit='kg', quantity='1e12')]
+    for fields in bad:
+        assert post(client, '/staff/inventory', **fields).status_code == 400, fields
+    assert not [c for c in calls[before:] if c[1] == '/inventory']
+
+
+def test_inventory_api_error_is_flashed(setup):
+    client, _, state = sign_in_staff(setup)
+    state['failure'], state['failure_path'] = 409, ('PUT', '/inventory/1')
+    assert post(client, '/staff/inventory/1', name='Flour', unit='kg', quantity='1').status_code == 302
+    state['failure'] = None
+    assert b'Request denied' in client.get('/staff/inventory').data
+
+
+def test_analytics_page_and_ranges(setup):
+    client, calls, _ = sign_in_staff(setup)
+    page = client.get('/staff/analytics?days=365')
+    assert page.status_code == 200
+    assert ('GET', '/orders') in [c[:2] for c in calls]
+    assert client.get('/staff/analytics?days=abc').status_code == 200
+    assert b'Last 30 days' in client.get('/staff/analytics?days=5').data
+
+
+def test_build_analytics_counts_and_estimates():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from app import build_analytics
+    menu = {'pizzas': MENU['/pizzas'], 'toppings': MENU['/toppings'], 'drinks': MENU['/drinks']}
+    now = datetime(2026, 10, 24, 20, 0, tzinfo=timezone.utc)
+    drink_order = dict(id=11, user_id=1, created_by_user_id=1, status='completed', pizzas=[],
+                       drinks=[dict(drink_id=1, quantity=3)], order_time='2026-10-24T01:30:00Z')
+    old = dict(ORDER, id=12, order_time='2026-01-01T12:00:00Z')
+    data = build_analytics([ORDER, drink_order, old], menu, 7, ZoneInfo('America/Chicago'), now=now)
+    assert data['orders'] == 2 and data['items'] == 5 and data['open_orders'] == 1
+    assert str(data['revenue']) == '21.00' and str(data['average']) == '10.50'
+    assert data['pizzas'] == [dict(name='Large pizza', count=2, top=2)]
+    assert data['toppings'][0]['name'] == 'Pepperoni' and data['drinks'][0]['count'] == 3
+    # 01:30 UTC on the 24th is 8:30 PM Central on the 23rd.
+    assert [r['orders'] for r in data['rows']][-2:] == [1, 1]
+    assert data['hour_chart']['bars'][20]['value'] == 1 and data['busiest'] in ('7 AM', '12 PM', '8 PM')
+    weekly = build_analytics([ORDER], menu, 365, ZoneInfo('UTC'), now=now)
+    assert weekly['step'] == 7 and len(weekly['rows']) == 53
